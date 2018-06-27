@@ -43,13 +43,15 @@ func connectionHandler() {
 			}(connection, clients[connection])
 
 		case message := <-messages:
-			for connection, _ := range clients {
+			for connection := range clients {
 				go func(connection net.Conn, message string) {
 					_, err := connection.Write([]byte(message))
 					if err != nil {
 						log.Println(err)
 					}
 				}(connection, message)
+
+				log.Println("New message", message)
 			}
 		}
 	}
