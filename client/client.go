@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"os"
 	"fmt"
+	"io"
 )
 
 func main() {
@@ -19,8 +20,10 @@ func main() {
 		for {
 			response := make([]byte, 1024)
 			n, err := connection.Read(response)
-			if err != nil {
-				fmt.Println(err)
+			if err == io.EOF {
+				fmt.Println("Server stopped !")
+				fmt.Println("Exit...")
+				os.Exit(1)
 			}
 			fmt.Print(string(response[:n]))
 		}

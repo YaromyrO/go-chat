@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 )
 
 const (
@@ -14,9 +15,11 @@ const (
 )
 
 var (
-	clients     map[net.Conn]string
+	clients     map[net.Conn]int
 	connections chan net.Conn
 	messages    chan string
+	mux         sync.Mutex
+	clientID    int
 )
 
 func connectionHandler() {
@@ -24,30 +27,32 @@ func connectionHandler() {
 		select {
 
 		case connection := <-connections:
-			log.Println("New client connected...")
+			log.Println("New client connected.")
 
-			fmt.Fprint(connection, "Enter your nickname: ")
-			nickname := bufio.NewScanner(connection)
-			nickname.Scan()
-			clients[connection] = nickname.Text()
+			clients[connection] = clientID
+			clientID++
 
-			go func(connection net.Conn, nickname string) {
+			go func(connection net.Conn, clientID int) {
 				reader := bufio.NewReader(connection)
 				for {
 					message, err := reader.ReadString('\n')
 					if err != nil {
 						break
 					}
-					messages <- fmt.Sprintf("|%s|: %s", nickname, message)
+					messages <- fmt.Sprintf("|Client %d|: %s", clientID, message)
 				}
-			}(connection, clients[connection])
+			}(connection, clientID)
 
 		case message := <-messages:
 			for connection := range clients {
-				_, err := connection.Write([]byte(message))
-				if err != nil {
-					log.Println(err)
-				}
+				go func(connection net.Conn, message string) {
+					mux.Lock()
+					defer mux.Unlock()
+					_, err := connection.Write([]byte(message))
+					if err != nil {
+						log.Println(err)
+					}
+				}(connection, message)
 				log.Println("New message", message)
 			}
 		}
@@ -66,7 +71,7 @@ func acceptConnection(server net.Listener) {
 }
 
 func main() {
-	clients = make(map[net.Conn]string)
+	clients = make(map[net.Conn]int)
 	connections = make(chan net.Conn)
 	messages = make(chan string)
 
