@@ -44,13 +44,10 @@ func connectionHandler() {
 
 		case message := <-messages:
 			for connection := range clients {
-				go func(connection net.Conn, message string) {
-					_, err := connection.Write([]byte(message))
-					if err != nil {
-						log.Println(err)
-					}
-				}(connection, message)
-
+				_, err := connection.Write([]byte(message))
+				if err != nil {
+					log.Println(err)
+				}
 				log.Println("New message", message)
 			}
 		}
@@ -78,8 +75,6 @@ func main() {
 		log.Println(err)
 		os.Exit(1)
 	}
-
 	go acceptConnection(server)
 	connectionHandler()
-
 }
