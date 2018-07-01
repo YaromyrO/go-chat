@@ -3,9 +3,9 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"net"
-	"os"
 	"sync"
 )
 
@@ -14,72 +14,117 @@ const (
 	protocol = "tcp"
 )
 
-var (
-	clients     map[net.Conn]int
-	connections chan net.Conn
-	messages    chan string
-	mux         sync.Mutex
-	clientID    int
-)
+type user struct {
+	nickname string
+	output   chan message
+	mux sync.Mutex
+}
 
-func connectionHandler() {
+type message struct {
+	nickname string
+	text     string
+}
+
+type chat struct {
+	users map[string]user
+	join  chan user
+	leave chan user
+	input chan message
+}
+
+func (chat *chat) run() {
 	for {
 		select {
 
-		case connection := <-connections:
-			log.Println("New client connected.")
-
-			clients[connection] = clientID
-			clientID++
-
-			go func(connection net.Conn, clientID int) {
-				reader := bufio.NewReader(connection)
-				for {
-					message, err := reader.ReadString('\n')
-					if err != nil {
-						break
-					}
-					messages <- fmt.Sprintf("|Client %d|: %s", clientID, message)
+		case user := <-chat.join:
+			chat.users[user.nickname] = user
+			go func() {
+				chat.input <- message{
+					"GO-CHAT",
+					fmt.Sprintf("%s joined to GO-CHAT", user.nickname),
 				}
-			}(connection, clientID)
+			}()
 
-		case message := <-messages:
-			for connection := range clients {
-				go func(connection net.Conn, message string) {
-					mux.Lock()
-					defer mux.Unlock()
-					_, err := connection.Write([]byte(message))
-					if err != nil {
-						log.Println(err)
-					}
-				}(connection, message)
-				log.Println("New message", message)
+		case user := <-chat.leave:
+			delete(chat.users, user.nickname)
+			go func() {
+				chat.input <- message{
+					"GO-CHAT",
+					fmt.Sprintf("%s left from GO-CHAT", user.nickname),
+				}
+			}()
+
+		case message := <-chat.input:
+			for _, user := range chat.users {
+				select {
+				case user.output <- message:
+				default:
+
+				}
 			}
 		}
 	}
 }
 
-func acceptConnection(server net.Listener) {
-	for {
-		connection, err := server.Accept()
-		if err != nil {
-			log.Println(err)
-			os.Exit(1)
+func connectionHandler(connection net.Conn, chat *chat) {
+
+	defer connection.Close()
+
+	io.WriteString(connection, "Enter your nickname: ")
+	scanner := bufio.NewScanner(connection)
+	scanner.Scan()
+
+	user := user{
+		nickname: scanner.Text(),
+		output: make(chan message, 10),
+	}
+
+	chat.join <- user
+	defer func() {
+		chat.leave <- user
+	}()
+
+	go func() {
+		for scanner.Scan() {
+			chat.input <- message{
+				user.nickname,
+				scanner.Text(),
+			}
 		}
-		connections <- connection
+	}()
+
+	for message := range user.output {
+		user.mux.Lock()
+		_, err := io.WriteString(connection, message.nickname+": "+message.text+"\n")
+		if err != nil {
+			log.Println(err.Error())
+			break
+		}
+		user.mux.Unlock()
 	}
 }
 
 func main() {
-	clients = make(map[net.Conn]int)
-	connections = make(chan net.Conn)
-	messages = make(chan string)
-
 	server, err := net.Listen(protocol, address)
 	if err != nil {
-		log.Println(err)
-		os.Exit(1)
+		log.Fatalln(err.Error())
 	}
-	go acceptConnection(server)
-	connectionHandler()
+	defer server.Close()
+
+	chat := &chat{
+		make(map[string]user),
+		make(chan user),
+		make(chan user),
+		make(chan message),
+	}
+
+	go chat.run()
+
+	for {
+		connection, err := server.Accept()
+		if err != nil {
+			log.Fatalln(err.Error())
+		}
+		go connectionHandler(connection, chat)
+	}
 }
