@@ -8,9 +8,11 @@ import (
 	"os"
 )
 
+const proto = "tcp"
+
 func main() {
 
-	connection, err := net.Dial("tcp", "127.0.0.1:8080")
+	connection, err := net.Dial(proto, os.Args[1])
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

@@ -6,18 +6,15 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"sync"
 )
 
-const (
-	address  = "localhost:8080"
-	protocol = "tcp"
-)
+const proto = "tcp"
 
 type user struct {
 	nickname string
 	output   chan message
-	mux sync.Mutex
 }
 
 type message struct {
@@ -25,8 +22,13 @@ type message struct {
 	text     string
 }
 
+type safeUsers struct {
+	allUsers map[string]user
+	mux      sync.Mutex
+}
+
 type chat struct {
-	users map[string]user
+	users safeUsers
 	join  chan user
 	leave chan user
 	input chan message
@@ -37,31 +39,36 @@ func (chat *chat) run() {
 		select {
 
 		case user := <-chat.join:
-			chat.users[user.nickname] = user
+			chat.users.mux.Lock()
+			chat.users.allUsers[user.nickname] = user
 			go func() {
 				chat.input <- message{
 					"GO-CHAT",
 					fmt.Sprintf("%s joined to GO-CHAT", user.nickname),
 				}
 			}()
+			chat.users.mux.Unlock()
 
 		case user := <-chat.leave:
-			delete(chat.users, user.nickname)
+			chat.users.mux.Lock()
+			delete(chat.users.allUsers, user.nickname)
 			go func() {
 				chat.input <- message{
 					"GO-CHAT",
 					fmt.Sprintf("%s left from GO-CHAT", user.nickname),
 				}
 			}()
+			chat.users.mux.Unlock()
 
 		case message := <-chat.input:
-			for _, user := range chat.users {
+			chat.users.mux.Lock()
+			for _, user := range chat.users.allUsers {
 				select {
 				case user.output <- message:
 				default:
-
 				}
 			}
+			chat.users.mux.Unlock()
 		}
 	}
 }
@@ -76,7 +83,7 @@ func connectionHandler(connection net.Conn, chat *chat) {
 
 	user := user{
 		nickname: scanner.Text(),
-		output: make(chan message, 10),
+		output:   make(chan message, 10),
 	}
 
 	chat.join <- user
@@ -94,25 +101,23 @@ func connectionHandler(connection net.Conn, chat *chat) {
 	}()
 
 	for message := range user.output {
-		user.mux.Lock()
 		_, err := io.WriteString(connection, message.nickname+": "+message.text+"\n")
 		if err != nil {
 			log.Println(err.Error())
 			break
 		}
-		user.mux.Unlock()
 	}
 }
 
 func main() {
-	server, err := net.Listen(protocol, address)
+	server, err := net.Listen(proto, os.Args[1])
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
 	defer server.Close()
 
 	chat := &chat{
-		make(map[string]user),
+		safeUsers{allUsers: make(map[string]user)},
 		make(chan user),
 		make(chan user),
 		make(chan message),
