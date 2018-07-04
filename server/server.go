@@ -6,8 +6,8 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"sync"
+	"flag"
 )
 
 const proto = "tcp"
@@ -65,7 +65,6 @@ func (chat *chat) run() {
 			for _, user := range chat.users.allUsers {
 				select {
 				case user.output <- message:
-				default:
 				}
 			}
 			chat.users.mux.Unlock()
@@ -101,16 +100,21 @@ func connectionHandler(connection net.Conn, chat *chat) {
 	}()
 
 	for message := range user.output {
-		_, err := io.WriteString(connection, message.nickname+": "+message.text+"\n")
-		if err != nil {
-			log.Println(err.Error())
-			break
+		if message.nickname != user.nickname {
+			_, err := io.WriteString(connection, message.nickname+": "+message.text+"\n")
+			if err != nil {
+				log.Println(err.Error())
+				break
+			}
 		}
 	}
 }
 
 func main() {
-	server, err := net.Listen(proto, os.Args[1])
+	port := flag.String("port", "8080", "server port")
+	host := flag.String("host", "localhost", "server host")
+
+	server, err := net.Listen(proto, *host + ":" + *port)
 	if err != nil {
 		log.Fatalln(err.Error())
 	}

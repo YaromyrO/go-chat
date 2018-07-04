@@ -6,13 +6,16 @@ import (
 	"io"
 	"net"
 	"os"
+	"flag"
 )
 
 const proto = "tcp"
 
 func main() {
+	port := flag.String("port", "8080", "server port")
+	host := flag.String("host", "localhost", "server host")
 
-	connection, err := net.Dial(proto, os.Args[1])
+	connection, err := net.Dial(proto, *host + ":" + *port)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
